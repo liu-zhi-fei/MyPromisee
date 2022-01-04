@@ -2,7 +2,7 @@ const Pending = 'Pending'
 const Fulfilled = 'Fulfilled'
 const Rejected = 'Rejected'
 
-//
+// 只能执行一个
 function callOnes(a, b) {
     let canCalled = true
     
@@ -17,6 +17,8 @@ function callOnes(a, b) {
     
     return [warp(a), warp(b)]
 }
+
+const isObject = v => v !== null && typeof v === 'object' || typeof v === 'function'
 
 class MyPromise {
     status = Pending
@@ -42,7 +44,6 @@ class MyPromise {
         }
     }
     
-    
     #resolve = (v) => {
         this.#resolvePromise(v)
     }
@@ -65,12 +66,15 @@ class MyPromise {
     
     
     then(onFulfilled, onRejected) {
+        // 返回新promise
         const promise = new MyPromise(() => {})
+        // 订阅onFulfilled和onRejected
         this.reaction.push({
             onFulfilled,
             onRejected,
             promise,
         })
+        // 状态已确认,开始发布
         if (this.status !== Pending) {
             this.#triggerPromiseReactions()
         }
@@ -85,25 +89,12 @@ class MyPromise {
             [Rejected]: 'onRejected',
         }
         const handlerKey = handlerKeyMap[this.status]
+        // 根据status,取出对应订阅函数
         for (let {[handlerKey]: handler, promise} of reaction) {
-            //PromiseReactionJob
             queueMicrotask(() => {
-                // if (typeof handler !== 'function') {
-                //     // then没有处理函数 (eg: then(null,null))
-                //     // 值直接传递
-                //     switch (this.status) {
-                //         case Fulfilled:
-                //             handler = v => v
-                //             break
-                //         case Rejected:
-                //             handler = v => v
-                //             break
-                //     }
-                // }
-                
                 if (typeof handler !== 'function') {
-                    // then没有处理函数 (eg: then(null,null)),
-                    // 值直接传递
+                    // then没有订阅函数 (eg: then(null,null)),
+                    // 状态,值 直接传递
                     switch (this.status) {
                         case Fulfilled:
                             return promise.#resolve(this.value)
@@ -111,8 +102,7 @@ class MyPromise {
                             return promise.#reject(this.value)
                     }
                 } else {
-                    // then有处理函数 (eg: then(()=>1))),
-                    // 执行处理函数
+                    // then有订阅函数 (eg: then(()=>1))),
                     try {
                         let result = handler(this.value)
                         return promise.#resolve(result)
@@ -124,54 +114,58 @@ class MyPromise {
         }
     }
     
-    
+    // 处理 resolve中result的多种情况
     #resolvePromise = (result) => {
+        // result是this
         if (this === result) {
             return this.#reject(new TypeError('The promise and the return value are the same'))
         }
-        const isObject = v => v !== null && typeof v === 'object' || typeof v === 'function'
-        
+        // 非object直接赋值.
+        // 注意:function算object, null不算
         if (!isObject(result)) {
             return this.#fulfil(result);
         }
         let then;
         try {
-            // 把 result.then 赋值给 then
+            // 取 then
             then = result.then;
-            
         } catch (error) {
-            // 如果取 result.then 的值时抛出错误 e ，则以 e 为据因拒绝 promise
+            // 取 then 时抛出错误
             return this.#reject(error);
         }
-        // 非 thenable
+        
+        // 普通对象,非thenable对象
         if (typeof then !== 'function') {
             return this.#fulfil(result)
         }
+        
         // result是myPromise或thenable
-        try {
-            if (then === this.then) {
-                // 是原生myPromise
-                result.then(this.#fulfil, this.#reject)
-            } else {
-                // 是thenable
-                queueMicrotask(() => {
-                    const [resolve, reject] = callOnes(this.#resolve, this.#reject)
-                    try {
-                        // this指向thenable
-                        then.call(result, resolve, reject)
-                    } catch (error) {
-                        reject(error)
-                    }
-                })
-            }
-        } catch (error) {
-            this.#reject(error);
+        // 统一在下一个微任务确认状态
+        if (then === this.then) {
+            // result 是原生      myPromise
+            // this   是当前运行的 myPromise
+            
+            // 通过result.then,
+            // 在result确认状态后,确认this的状态
+            result.then(this.#fulfil, this.#reject)
+        } else {
+            // 是thenable（即带有"then" 方法的对象）
+            // 去执行它, 在下一个微任务
+            queueMicrotask(() => {
+                const [resolve, reject] = callOnes(this.#resolve, this.#reject)
+                try {
+                    // this指向thenable
+                    then.call(result, resolve, reject)
+                } catch (error) {
+                    reject(error)
+                }
+            })
         }
     }
-    
 }
 
-let o = {
+// promise A+ test
+module.exports = {
     deferred() {
         const result = {};
         result.promise = new MyPromise(function (resolve, reject) {
@@ -187,5 +181,4 @@ let o = {
         return MyPromise.reject(reason)
     },
 }
-module.exports = o
 

@@ -140,21 +140,20 @@ class MyPromise {
         }
         
         // result是myPromise或thenable
-        // ecma规定,统一在下一个微任务,处理
+        // ecma规定,统一在下一个微任务处理
         queueMicrotask(() => {
             if (then === this.then) {
-                // result 是原生      myPromise
-                // this   是当前运行的 myPromise
+                // result 是传入的值   myPromise
+                // this   是当前运行的  myPromise
                 
                 // 通过result.then.   (无法直接取值,因为result可能在Pending状态)
                 // 在result确认状态后,确认this的状态
                 result.then(this.#fulfil, this.#reject)
             } else {
                 // 是thenable（即带有"then" 方法的对象）
-                // 去执行它, 在下一个微任务
                 const [resolve, reject] = callOnes(this.#resolve, this.#reject)
                 try {
-                    // this指向thenable
+                    // 去执行它 this指向thenable
                     then.call(result, resolve, reject)
                 } catch (error) {
                     reject(error)
